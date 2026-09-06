@@ -1,323 +1,549 @@
-import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+
 import VideoPlayer from "../components/VideoPlayer";
+import UserList from "../components/UserList";
+import ChatBox from "../components/ChatBox";
 import useSocket from "../hooks/useSocket";
 import { getYouTubeVideoId } from "../utils/youtube";
 
 const WatchRoom = () => {
-    const { roomId } = useParams();
-    const navigate = useNavigate();
-    const socket = useSocket();
+  const { roomId } = useParams();
+  const navigate = useNavigate();
+  const socket = useSocket();
+  const joinedRef = useRef(false);
 
-    const [videoId, setVideoId] = useState("");
-    const [videoUrl, setVideoUrl] = useState("");
-    const [currentTime, setCurrentTime] = useState(0);
-    const [isPlaying, setIsPlaying] = useState(false);
-    const [users, setUsers] = useState(1);
-    const [connected, setConnected] = useState(false);
+  const [videoId, setVideoId] = useState("");
+  const [videoUrl, setVideoUrl] = useState("");
+  const [currentTime, setCurrentTime] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
 
-    console.log("WatchRoom loaded:", roomId);
+  const [users, setUsers] = useState([]);
 
+  const [messages, setMessages] = useState([]);
 
-    // ==========================================
-    // ROOM STATE + USERS LISTENER
-    // IMPORTANT: YE JOIN SE PEHLE HONA CHAHIYE
-    // ==========================================
-    useEffect(() => {
-        if (!socket) return;
+  const [connected, setConnected] = useState(false);
 
-        const handleSyncState = (state) => {
-            console.log("Room state received:", state);
+  const [myRole, setMyRole] = useState("viewer");
 
-            setVideoId(state.videoId || "");
-            setCurrentTime(state.currentTime || 0);
-            setIsPlaying(state.isPlaying || false);
-        };
+  // =========================
+  // USER NAME
+  // =========================
+  const [userName, setUserName] = useState(() => {
+    return localStorage.getItem("watchPartyName") || "";
+  });
 
-        const handleRoomUsers = ({ users }) => {
-            console.log("🔥 USERS UPDATED:", users);
+  // =========================
+  // ASK NAME IF NOT AVAILABLE
+  // =========================
+  useEffect(() => {
+    if (!userName.trim()) {
+      const name = window.prompt("Enter your name:");
 
-            setUsers(users);
-        };
+      const finalName = name?.trim() || "Guest";
 
-        socket.on("sync-state", handleSyncState);
-        socket.on("room-users", handleRoomUsers);
+      localStorage.setItem("watchPartyName", finalName);
 
-        return () => {
-            socket.off("sync-state", handleSyncState);
-            socket.off("room-users", handleRoomUsers);
-        };
-    }, [socket]);
+      setUserName(finalName);
+    }
+  }, [userName]);
 
+  // =========================
+  // SOCKET EVENTS
+  // =========================
+  useEffect(() => {
+    if (!socket) return;
 
-    // ==========================================
-    // SOCKET CONNECT + JOIN ROOM
-    // ==========================================
-    useEffect(() => {
-        if (!socket) return;
+    // =========================
+    // SYNC STATE
+    // =========================
+    const handleSyncState = (state) => {
+      console.log("📥 SYNC STATE:", state);
 
-        const joinRoom = () => {
-            console.log("🟢 Socket connected:", socket.id);
+      setVideoId(state.videoId || "");
 
-            setConnected(true);
+      setCurrentTime(Number(state.currentTime) || 0);
 
-            console.log("➡️ Joining room:", roomId);
+      setIsPlaying(Boolean(state.isPlaying));
 
-            socket.emit("join-room", {
-                roomId,
-            });
-        };
+      const role = state.myRole || "viewer";
 
-        const handleDisconnect = () => {
-            console.log("🔴 Socket disconnected");
+      console.log("🔑 MY ROLE:", role);
 
-            setConnected(false);
-        };
-
-        const handleConnectError = (error) => {
-            console.error("❌ Socket connection error:", error.message);
-
-            setConnected(false);
-        };
-
-        socket.on("connect", joinRoom);
-        socket.on("disconnect", handleDisconnect);
-        socket.on("connect_error", handleConnectError);
-
-        // Agar socket already connected hai
-        if (socket.connected) {
-            joinRoom();
-        }
-
-        return () => {
-            socket.off("connect", joinRoom);
-            socket.off("disconnect", handleDisconnect);
-            socket.off("connect_error", handleConnectError);
-        };
-    }, [socket, roomId]);
-
-
-    // ==========================================
-    // VIDEO CHANGE LISTENER
-    // ==========================================
-    useEffect(() => {
-        if (!socket) return;
-
-        const handleVideoChange = ({ videoId }) => {
-            console.log("🎬 Video changed:", videoId);
-
-            setVideoId(videoId);
-            setCurrentTime(0);
-            setIsPlaying(false);
-        };
-
-        socket.on("video-change", handleVideoChange);
-
-        return () => {
-            socket.off("video-change", handleVideoChange);
-        };
-    }, [socket]);
-
-
-    // ==========================================
-    // CHANGE VIDEO
-    // ==========================================
-    const changeVideo = () => {
-        const newVideoId = getYouTubeVideoId(videoUrl);
-
-        if (!newVideoId) {
-            alert("Please enter a valid YouTube URL");
-            return;
-        }
-
-        console.log("🎬 Changing video:", newVideoId);
-
-        setVideoId(newVideoId);
-        setCurrentTime(0);
-        setIsPlaying(false);
-
-        socket.emit("video-change", {
-            roomId,
-            videoId: newVideoId,
-        });
-
-        setVideoUrl("");
+      setMyRole(role);
     };
 
+    // =========================
+    // USERS LIST
+    // =========================
+    const handleUsersList = ({ users }) => {
+      console.log("👥 USERS:", users);
 
-    // ==========================================
-    // COPY ROOM ID
-    // ==========================================
-    const copyRoomId = async () => {
-        try {
-            await navigator.clipboard.writeText(roomId);
-
-            alert("Room ID copied!");
-        } catch (error) {
-            console.error("Copy failed:", error);
-        }
+      if (Array.isArray(users)) {
+        setUsers(users);
+      } else {
+        setUsers([]);
+      }
     };
 
+    // =========================
+    // VIDEO CHANGE
+    // =========================
+    const handleVideoChange = ({ videoId }) => {
+      console.log("🎬 VIDEO CHANGE:", videoId);
 
-    // ==========================================
-    // UI
-    // ==========================================
-    return (
-        <div className="watch-page">
+      setVideoId(videoId || "");
 
-            {/* ================= NAVBAR ================= */}
+      setCurrentTime(0);
 
-            <header className="room-navbar">
+      setIsPlaying(false);
+    };
 
-                <div className="logo">
-                    WatchParty
-                </div>
+    // =========================
+    // ROLE UPDATED
+    // =========================
+    const handleRoleUpdated = ({ newRole }) => {
+      console.log("🔑 ROLE UPDATED:", newRole);
 
-                <div className="room-info">
+      setMyRole(newRole);
+    };
 
-                    <span>
-                        Room: <strong>{roomId}</strong>
-                    </span>
+    // =========================
+    // CHAT MESSAGE
+    // =========================
+    const handleChatMessage = (message) => {
+      console.log("💬 CHAT MESSAGE:", message);
 
-                    <span>
-                        👥 {users}
-                    </span>
+      setMessages((prevMessages) => [
+        ...prevMessages,
+        {
+          user: message.user || "Guest",
+          text: message.text || "",
+        },
+      ]);
+    };
 
-                    <span>
-                        {connected
-                            ? "🟢 Connected"
-                            : "🔴 Disconnected"}
-                    </span>
+    // =========================
+    // CHAT HISTORY
+    // =========================
+    const handleChatHistory = ({ messages }) => {
+      console.log("💬 CHAT HISTORY:", messages);
 
-                    <button onClick={copyRoomId}>
-                        Copy ID
-                    </button>
+      if (Array.isArray(messages)) {
+        setMessages(messages);
+      }
+    };
 
-                    <button onClick={() => navigate("/")}>
-                        Leave
-                    </button>
+    // =========================
+    // ERROR
+    // =========================
+    const handleError = (message) => {
+      console.error("❌ SERVER ERROR:", message);
 
-                </div>
+      alert(message);
+    };
 
-            </header>
+    // =========================
+    // KICKED
+    // =========================
+    const handleKicked = (message) => {
+      alert(message);
 
+      socket.disconnect();
 
-            {/* ================= MAIN ================= */}
+      navigate("/");
+    };
 
-            <main className="watch-container">
+    socket.on("sync-state", handleSyncState);
 
-                {/* ================= VIDEO ================= */}
+    socket.on("room-users-list", handleUsersList);
 
-                <section className="video-section">
+    socket.on("video-change", handleVideoChange);
 
-                    <VideoPlayer
-                        videoId={videoId}
-                        socket={socket}
-                        roomId={roomId}
-                        initialTime={currentTime}
-                        initialPlaying={isPlaying}
-                    />
+    socket.on("role-updated", handleRoleUpdated);
 
+    socket.on("chat-message", handleChatMessage);
 
-                    {/* VIDEO URL CONTROLS */}
+    socket.on("chat-history", handleChatHistory);
 
-                    <div className="video-controls">
+    socket.on("error-msg", handleError);
 
-                        <input
-                            type="text"
-                            placeholder="Paste YouTube URL..."
-                            value={videoUrl}
-                            onChange={(e) => {
-                                setVideoUrl(e.target.value);
-                            }}
-                            onKeyDown={(e) => {
-                                if (e.key === "Enter") {
-                                    changeVideo();
-                                }
-                            }}
-                        />
+    socket.on("kicked", handleKicked);
 
-                        <button onClick={changeVideo}>
-                            Change Video
-                        </button>
+    return () => {
+      socket.off("sync-state", handleSyncState);
 
-                    </div>
+      socket.off("room-users-list", handleUsersList);
 
-                </section>
+      socket.off("video-change", handleVideoChange);
 
+      socket.off("role-updated", handleRoleUpdated);
 
-                {/* ================= SIDEBAR ================= */}
+      socket.off("chat-message", handleChatMessage);
 
-                <aside className="sidebar">
+      socket.off("chat-history", handleChatHistory);
 
-                    <h2>
-                        👥 Watch Party
-                    </h2>
+      socket.off("error-msg", handleError);
 
+      socket.off("kicked", handleKicked);
+    };
+  }, [socket, navigate]);
 
-                    {/* CONNECTION */}
+  // =========================
+  // CONNECT + JOIN ROOM
+  // =========================
+  useEffect(() => {
+    if (!socket || !roomId || !userName.trim()) {
+      return;
+    }
 
-                    <div className="online-status">
+    const joinRoom = () => {
+      if (joinedRef.current) {
+        return;
+      }
 
-                        {connected
-                            ? "🟢 Connected"
-                            : "🔴 Disconnected"}
+      joinedRef.current = true;
 
-                    </div>
+      setConnected(true);
 
+      console.log("🟢 SOCKET CONNECTED:", socket.id);
 
-                    {/* ROOM ID */}
+      console.log("➡️ JOINING ROOM:", roomId);
 
-                    <div className="party-info">
+      console.log("👤 USER NAME:", userName);
 
-                        <p>
-                            Room ID
-                        </p>
+      socket.emit("join-room", {
+        roomId,
 
-                        <strong>
-                            {roomId}
-                        </strong>
+        user: {
+          name: userName.trim(),
+        },
+      });
+    };
 
-                    </div>
+    const handleDisconnect = () => {
+      console.log("🔴 SOCKET DISCONNECTED");
 
+      setConnected(false);
 
-                    {/* USERS */}
+      joinedRef.current = false;
+    };
 
-                    <div className="party-info">
+    const handleConnectError = (error) => {
+      console.error("❌ CONNECTION ERROR:", error.message);
 
-                        <p>
-                            Users watching
-                        </p>
+      setConnected(false);
+    };
 
-                        <strong>
-                            👥 {users}
-                        </strong>
+    socket.on("connect", joinRoom);
 
-                    </div>
+    socket.on("disconnect", handleDisconnect);
 
+    socket.on("connect_error", handleConnectError);
 
-                    {/* SYNC INFO */}
+    if (socket.connected) {
+      joinRoom();
+    }
 
-                    <div className="sync-info">
+    return () => {
+      socket.off("connect", joinRoom);
 
-                        <h3>
-                            🔄 Real-Time Sync
-                        </h3>
+      socket.off("disconnect", handleDisconnect);
 
-                        <p>
-                            Play, pause, seek and video changes
-                            are synchronized with everyone in
-                            this room.
-                        </p>
+      socket.off("connect_error", handleConnectError);
+    };
+  }, [socket, roomId, userName]);
 
-                    </div>
+  // =========================
+  // CHANGE VIDEO
+  // =========================
+  const changeVideo = () => {
+    if (myRole !== "host" && myRole !== "moderator") {
+      alert("Only Host or Moderator can change video.");
 
-                </aside>
+      return;
+    }
 
-            </main>
+    const newVideoId = getYouTubeVideoId(videoUrl);
 
-        </div>
+    if (!newVideoId) {
+      alert("Please enter a valid YouTube URL.");
+
+      return;
+    }
+
+    socket.emit("change-video", {
+      roomId,
+      videoId: newVideoId,
+    });
+
+    setVideoUrl("");
+  };
+
+  // =========================
+  // ASSIGN ROLE
+  // =========================
+  const handleAssignRole = (targetSocketId, newRole) => {
+    if (myRole !== "host") {
+      alert("Only Host can assign roles.");
+
+      return;
+    }
+
+    socket.emit("assign-role", {
+      roomId,
+      targetSocketId,
+      newRole,
+    });
+  };
+
+  // =========================
+  // REMOVE USER
+  // =========================
+  const handleRemoveUser = (targetSocketId) => {
+    if (myRole !== "host") {
+      alert("Only Host can remove users.");
+
+      return;
+    }
+
+    const targetUser = users.find((user) => user.id === targetSocketId);
+
+    const confirmed = window.confirm(
+      `Remove ${targetUser?.name || "this user"} from the room?`,
     );
+
+    if (!confirmed) {
+      return;
+    }
+
+    socket.emit("remove-participant", {
+      roomId,
+      targetSocketId,
+    });
+  };
+
+  // =========================
+  // TRANSFER HOST
+  // =========================
+  const handleTransferHost = (targetSocketId) => {
+    if (myRole !== "host") {
+      alert("Only Host can transfer host.");
+
+      return;
+    }
+
+    const targetUser = users.find((user) => user.id === targetSocketId);
+
+    if (!targetUser) {
+      return;
+    }
+
+    const confirmed = window.confirm(`Make ${targetUser.name} the new Host?`);
+
+    if (!confirmed) {
+      return;
+    }
+
+    socket.emit("transfer-host", {
+      roomId,
+      targetSocketId,
+    });
+  };
+
+  // =========================
+  // SEND CHAT MESSAGE
+  // =========================
+  const handleSendMessage = (text) => {
+    if (!socket || !socket.connected) {
+      alert("You are not connected.");
+
+      return;
+    }
+
+    if (!text?.trim()) {
+      return;
+    }
+
+    socket.emit("chat-message", {
+      roomId,
+      user: userName,
+      text: text.trim(),
+    });
+  };
+
+  // =========================
+  // COPY ROOM ID
+  // =========================
+  const copyRoomId = async () => {
+    try {
+      await navigator.clipboard.writeText(roomId);
+
+      alert("Room ID copied!");
+    } catch (error) {
+      console.error("Copy failed:", error);
+    }
+  };
+
+  // =========================
+  // LEAVE ROOM
+  // =========================
+  const leaveRoom = () => {
+    if (socket) {
+      socket.disconnect();
+    }
+
+    navigate("/");
+  };
+
+  // =========================
+  // PERMISSIONS
+  // =========================
+  const canControl = myRole === "host" || myRole === "moderator";
+
+  const isHost = myRole === "host";
+
+  // =========================
+  // UI
+  // =========================
+  return (
+    <div className="watch-page">
+      {/* =========================
+          NAVBAR
+      ========================= */}
+      <header className="room-navbar">
+        <div className="logo">WatchParty</div>
+
+        <div className="room-info">
+          <span>
+            Room: <strong>{roomId}</strong>
+          </span>
+
+          <span>👥 {users.length}</span>
+
+          <span>{connected ? "🟢 Connected" : "🔴 Disconnected"}</span>
+
+          <span>👤 {userName}</span>
+
+          <span>🔑 {myRole}</span>
+
+          <button onClick={copyRoomId}>Copy ID</button>
+
+          <button onClick={leaveRoom}>Leave</button>
+        </div>
+      </header>
+
+      {/* =========================
+          MAIN
+      ========================= */}
+      <main className="watch-container">
+        {/* =========================
+            VIDEO SECTION
+        ========================= */}
+        <section className="video-section">
+          <VideoPlayer
+            videoId={videoId}
+            socket={socket}
+            roomId={roomId}
+            initialTime={currentTime}
+            initialPlaying={isPlaying}
+            canControl={canControl}
+          />
+
+          {/* =========================
+              VIDEO URL CONTROL
+          ========================= */}
+          <div className="video-controls">
+            <input
+              type="text"
+              placeholder={
+                canControl
+                  ? "Paste YouTube URL..."
+                  : "Only Host or Moderator can change video"
+              }
+              value={videoUrl}
+              onChange={(e) => setVideoUrl(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  changeVideo();
+                }
+              }}
+              disabled={!canControl}
+            />
+
+            <button onClick={changeVideo} disabled={!canControl}>
+              Change Video
+            </button>
+          </div>
+        </section>
+
+        {/* =========================
+            SIDEBAR
+        ========================= */}
+        <aside className="sidebar">
+          <h2>👥 Watch Party</h2>
+
+          {/* CONNECTION */}
+          <div className="online-status">
+            {connected ? "🟢 Connected" : "🔴 Disconnected"}
+          </div>
+
+          {/* ROOM ID */}
+          <div className="party-info">
+            <p>Room ID</p>
+
+            <strong>{roomId}</strong>
+          </div>
+
+          {/* USERS COUNT */}
+          <div className="party-info">
+            <p>Users watching</p>
+
+            <strong>👥 {users.length}</strong>
+          </div>
+
+          {/* CURRENT USER */}
+          <div className="party-info">
+            <p>You</p>
+
+            <strong>👤 {userName}</strong>
+
+            <small>Role: {myRole}</small>
+          </div>
+
+          {/* =========================
+              USER LIST
+          ========================= */}
+          <UserList
+            users={users}
+            currentUserSocketId={socket?.id}
+            onAssignRole={handleAssignRole}
+            onRemoveUser={handleRemoveUser}
+            onTransferHost={handleTransferHost}
+            isHost={isHost}
+          />
+
+          {/* =========================
+              CHAT BOX
+          ========================= */}
+          <ChatBox messages={messages} onSendMessage={handleSendMessage} />
+
+          {/* =========================
+              SYNC INFO
+          ========================= */}
+          <div className="sync-info">
+            <h3>🔄 Real-Time Sync</h3>
+
+            <p>
+              {canControl
+                ? "You can control playback for everyone."
+                : "You can watch only. Playback is controlled by Host or Moderator."}
+            </p>
+          </div>
+        </aside>
+      </main>
+    </div>
+  );
 };
 
 export default WatchRoom;

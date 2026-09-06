@@ -6,11 +6,6 @@ const useSocket = () => {
     if (!socket.connected) {
       socket.connect();
     }
-
-    return () => {
-      // React StrictMode ki wajah se development mein
-      // socket ko baar-baar disconnect mat karo
-    };
   }, []);
 
   return socket;
